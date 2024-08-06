@@ -12,6 +12,12 @@ import unittest
 
 import torch
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
+from torchao.quantization.linear_activation_quantized_tensor import (
+    LinearActivationQuantizedTensor,
+)
+from torchao.quantization.prototype.qat.affine_fake_quantized_tensor import (
+    AffineFakeQuantizedTensor,
+)
 from torchao.quantization.prototype.qat.utils import (
     _choose_qparams_per_token_asymmetric,
     _fake_quantize_per_channel_group,
@@ -252,6 +258,13 @@ class TestQAT(unittest.TestCase):
             enable_8da4w_fake_quant,
         )
 
+        def assert_fake_quant_enabled(m: torch.nn.Linear, enabled: bool):
+            assert isinstance(m.weight, LinearActivationQuantizedTensor)
+            self.assertEqual(m.weight.input_quant_func_enabled, enabled)
+            weight = m.weight.original_weight_tensor
+            self.assertTrue(isinstance(weight, AffineFakeQuantizedTensor))
+            self.assertEqual(weight.fake_quant_enabled, enabled)
+
         group_size = 16
         torch.manual_seed(self.SEED)
         m = M()
@@ -260,9 +273,9 @@ class TestQAT(unittest.TestCase):
         quantizer = Int8DynActInt4WeightQATQuantizer(groupsize=group_size)
         qat_model = quantizer.prepare(m)
         qat_model.apply(disable_8da4w_fake_quant)
-        self.assertFalse(qat_model.linear1._fake_quant_enabled)
-        self.assertFalse(qat_model.linear2._fake_quant_enabled)
-        self.assertFalse(qat_model.sub.linear._fake_quant_enabled)
+        assert_fake_quant_enabled(qat_model.linear1, enabled=False)
+        assert_fake_quant_enabled(qat_model.linear2, enabled=False)
+        assert_fake_quant_enabled(qat_model.sub.linear, enabled=False)
 
         # Disabled fake quant is just a normal linear
         m2.linear1.weight = qat_model.linear1.weight
@@ -277,9 +290,9 @@ class TestQAT(unittest.TestCase):
 
         # Renable fake quant
         qat_model.apply(enable_8da4w_fake_quant)
-        self.assertTrue(qat_model.linear1._fake_quant_enabled)
-        self.assertTrue(qat_model.linear2._fake_quant_enabled)
-        self.assertTrue(qat_model.sub.linear._fake_quant_enabled)
+        assert_fake_quant_enabled(qat_model.linear1, enabled=True)
+        assert_fake_quant_enabled(qat_model.linear2, enabled=True)
+        assert_fake_quant_enabled(qat_model.sub.linear, enabled=True)
 
         # Fake quant should be applied as normal
         quantizer2 = Int8DynActInt4WeightQATQuantizer(groupsize=group_size)
